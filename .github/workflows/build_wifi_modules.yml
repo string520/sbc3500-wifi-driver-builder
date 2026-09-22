@@ -24,6 +24,9 @@ jobs:
           sudo update-alternatives --install /usr/bin/llvm-ar llvm-ar /usr/bin/llvm-ar-14 100
           sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-14 100
           sudo update-alternatives --install /usr/bin/llvm-strip llvm-strip /usr/bin/llvm-strip-14 100
+          sudo ln -sf /usr/bin/lld-14 /usr/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-objcopy-14 /usr/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-readelf-14 /usr/bin/llvm-readelf
 
       - name: Setup Rockchip Linux 5.10 Kernel Tree
         run: |
@@ -38,14 +41,9 @@ jobs:
           echo "Applying SBC3500 device .config..."
           cp ../sbc3500_android13.config .config
           
-          # Force architecture and compiler flags
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export LLVM=1
-          export LLVM_IAS=1
-
-          make olddefconfig
-          make prepare modules_prepare -j$(nproc)
+          # Explicitly set architecture and LLVM toolchain
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 prepare modules_prepare -j$(nproc)
           echo "Kernel tree prepared successfully."
 
       - name: Build RTL8821CU Driver Module
@@ -58,12 +56,7 @@ jobs:
           sed -i 's/CONFIG_PLATFORM_I386_PC = y/CONFIG_PLATFORM_I386_PC = n/g' Makefile
           sed -i 's/CONFIG_PLATFORM_ARM_RPI = n/CONFIG_PLATFORM_ARM_RPI = n/g' Makefile
           
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export LLVM=1
-          export LLVM_IAS=1
-          
-          make KSRC=$(pwd)/../linux-rk -j$(nproc) modules
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 KSRC=$(pwd)/../linux-rk -j$(nproc) modules
           ls -la *.ko
 
       - name: Build RTL88x2BU Driver Module
@@ -74,12 +67,7 @@ jobs:
           
           sed -i 's/CONFIG_PLATFORM_I386_PC = y/CONFIG_PLATFORM_I386_PC = n/g' Makefile
           
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export LLVM=1
-          export LLVM_IAS=1
-          
-          make KSRC=$(pwd)/../linux-rk -j$(nproc) modules
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 KSRC=$(pwd)/../linux-rk -j$(nproc) modules
           ls -la *.ko
 
       - name: Package and inspect modules
