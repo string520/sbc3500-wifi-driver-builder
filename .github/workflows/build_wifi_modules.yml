@@ -1,0 +1,108 @@
+name: Build Rockchip RTL8821CU and RTL8822BU Modules
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libncurses-dev bison flex libssl-dev libelf-dev bc git wget kmod \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu clang-14 lld-14 llvm-14
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
+          sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-14 100
+          sudo update-alternatives --install /usr/bin/llvm-ar llvm-ar /usr/bin/llvm-ar-14 100
+          sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-14 100
+          sudo update-alternatives --install /usr/bin/llvm-strip llvm-strip /usr/bin/llvm-strip-14 100
+
+      - name: Setup Rockchip Linux 5.10 Kernel Tree
+        run: |
+          echo "Cloning Rockchip Linux 5.10 kernel source..."
+          git clone --depth=50 --branch develop-5.10 https://github.com/rockchip-linux/kernel.git linux-rk
+          cd linux-rk
+
+          echo "Configuring Kernel Version to 5.10.157..."
+          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 157/' Makefile
+          sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
+
+          echo "Applying SBC3500 device .config..."
+          cp ../sbc3500_android13.config .config
+          
+          # Force architecture and compiler flags
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export LLVM=1
+          export LLVM_IAS=1
+
+          make olddefconfig
+          make prepare modules_prepare -j$(nproc)
+          echo "Kernel tree prepared successfully."
+
+      - name: Build RTL8821CU Driver Module
+        run: |
+          echo "Cloning morrownr/8821cu-20210916..."
+          git clone --depth=1 https://github.com/morrownr/8821cu-20210916.git rtl8821cu
+          cd rtl8821cu
+          
+          # Disable default x86 platform
+          sed -i 's/CONFIG_PLATFORM_I386_PC = y/CONFIG_PLATFORM_I386_PC = n/g' Makefile
+          sed -i 's/CONFIG_PLATFORM_ARM_RPI = n/CONFIG_PLATFORM_ARM_RPI = n/g' Makefile
+          
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export LLVM=1
+          export LLVM_IAS=1
+          
+          make KSRC=$(pwd)/../linux-rk -j$(nproc) modules
+          ls -la *.ko
+
+      - name: Build RTL88x2BU Driver Module
+        run: |
+          echo "Cloning RinCat/RTL88x2BU-Linux-Driver..."
+          git clone --depth=1 https://github.com/RinCat/RTL88x2BU-Linux-Driver.git rtl8822bu
+          cd rtl8822bu
+          
+          sed -i 's/CONFIG_PLATFORM_I386_PC = y/CONFIG_PLATFORM_I386_PC = n/g' Makefile
+          
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export LLVM=1
+          export LLVM_IAS=1
+          
+          make KSRC=$(pwd)/../linux-rk -j$(nproc) modules
+          ls -la *.ko
+
+      - name: Package and inspect modules
+        run: |
+          mkdir -p output_modules
+          if [ -f rtl8821cu/8821cu.ko ]; then
+            cp rtl8821cu/8821cu.ko output_modules/8821cu.ko
+            # Wi-Fi HAL looking for 8822bu.ko: provide fallback alias
+            cp rtl8821cu/8821cu.ko output_modules/8821cu_as_8822bu.ko
+          fi
+          if [ -f rtl8822bu/88x2bu.ko ]; then
+            cp rtl8822bu/88x2bu.ko output_modules/8822bu.ko
+          fi
+          
+          echo "=== Module Information ==="
+          for mod in output_modules/*.ko; do
+            echo "--- $mod ---"
+            modinfo $mod || true
+          done
+
+      - name: Upload driver modules artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbc3500-wifi-modules-5.10.157
+          path: output_modules/*.ko
+          retention-days: 14
